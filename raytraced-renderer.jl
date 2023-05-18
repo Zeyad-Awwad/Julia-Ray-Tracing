@@ -1,14 +1,10 @@
-#import Pkg; Pkg.add("Image")
 using CUDA, Random, Plots, Images
-
-
 
 function find_intersections!(intersections::CuDeviceVector{Float32, 1}, pos::CuDeviceMatrix{Float32, 1}, direction::CuDeviceMatrix{Float32, 1}, 
                                 R_cir::CuDeviceVector{Float32, 1}, C_cir::CuDeviceMatrix{Float32, 1}, V_tri::CuDeviceArray{Float32, 3, 1}, objects::CuDeviceMatrix{Int32, 1},
                                 offsets::CuDeviceMatrix{Float32, 1}, E1::CuDeviceMatrix{Float32, 1}, E2::CuDeviceMatrix{Float32, 1}, T::CuDeviceMatrix{Float32, 1}, 
                                 P::CuDeviceMatrix{Float32, 1}, Q::CuDeviceMatrix{Float32, 1} )
     index, stride = threadIdx().x, blockDim().x
-    #@cuprintln("(1) thread $index, block $stride")
     for i = index:stride:length(intersections)
 
         intersections[i], objects[i,1], objects[i,2] = -1, 0, 0
@@ -157,16 +153,6 @@ function bounce!(intersections::CuDeviceVector{Float32, 1}, pos::CuDeviceMatrix{
                     if cos_theta > 1
                         cos_theta = 1.
                     end
-                    """
-                    p1 = refraction * (direction[i,1] + nx*cos_theta)
-                    p2 = refraction * (direction[i,2] + ny*cos_theta)
-                    p3 = refraction * (direction[i,3] + nz*cos_theta)
-                    p_tot = p1*p1 + p2*p2 + p3*p3
-
-                    direction[i,1] = p1 - nx*sqrt( abs(1 - p_tot) ) 
-                    direction[i,2] = p2 - ny*sqrt( abs(1 - p_tot) ) 
-                    direction[i,3] = p3 - nz*sqrt( abs(1 - p_tot) ) 
-                    """
                     sin_theta = sqrt(1 - cos_theta*cos_theta)
                     if refraction * sin_theta > 1
                         # reflect perfectly (update to add slight diffusivity)
@@ -189,9 +175,6 @@ function bounce!(intersections::CuDeviceVector{Float32, 1}, pos::CuDeviceMatrix{
                 end
 
             elseif objects[i,1] == 2
-                #ray_color[i,1] *= 0.25
-                #ray_color[i,2] *= 0.75
-                #ray_color[i,3] *= 0.25
                 ray_color[i,1] *= tri_color[j,1]  
                 ray_color[i,2] *= tri_color[j,2] 
                 ray_color[i,3] *= tri_color[j,3] 
@@ -246,10 +229,7 @@ C_cir = Float32.( [ C_cir R_cir ]  )
 V_tri = Float32.( cat( [-100 -100 0 ; -100 20 0; 100 20 0], [-100 -100 0; 100 -100 0; 100 20 0], dims=3) )
 
 
-
-
-
-
+# Generate random rays to cast from the camera
 x = 10*rand(N_rays) 
 z = 5*rand(N_rays) 
 y = -5*ones(N_rays) 
@@ -262,15 +242,15 @@ zdim = 1 .+ ceil.(Int32, 5/dz)
 image_gpu = cu( zeros(Float32, 4, xdim, zdim) )
 
 
+# Create all GPU data structures
 pos_gpu = cu(pos)
 direction_gpu = cu(direction)
-
-
 R_cir_gpu = cu(R_cir)
 C_cir_gpu = cu(C_cir)
 V_tri_gpu = cu(V_tri)
 
 
+# Some data structures used to handle intermediate computations (to lessen the burden on registers)
 objects = cu( zeros(Int32, N_rays, 2) )
 offsets = cu( zeros(Float32, N_rays, 3) )
 E1 = cu( zeros(Float32, N_rays,3) )
@@ -280,9 +260,9 @@ Q = cu( zeros(Float32, N_rays,3) )
 P = cu( zeros(Float32, N_rays,3) )
 
 
+# Assign colors and materials to all objects
 ray_color = cu( ones(Float32, N_rays,3) )
 tri_color = cu( ones(Float32, N_triangles,3) .* [0.5 1 0.5] )
-
 
 cir_color = 0.25 .+ 0.75 * rand(Float32, N_spheres,3) 
 too_green = (cir_color[:,2] .> cir_color[:,1]) .* (cir_color[:,2] .> cir_color[:,3])
